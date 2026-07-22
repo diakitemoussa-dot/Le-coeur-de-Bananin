@@ -317,12 +317,33 @@ const arViewer = document.getElementById('ar-viewer');
 const arIncompatibilityScreen = document.getElementById('ar-incompatibility-screen');
 const arIncompatibilityBtn = document.getElementById('ar-incompatibility-btn');
 
-arButton.addEventListener('click', () => {
-  if (arViewer && arViewer.canActivateAR) {
+function tryActivateAR() {
+  if (arViewer.canActivateAR) {
     arViewer.activateAR();
   } else {
     arIncompatibilityScreen.classList.remove('hidden');
     arIncompatibilityScreen.classList.add('visible');
+  }
+}
+
+let arModelRequested = false;
+
+arButton.addEventListener('click', () => {
+  if (!arViewer) return;
+  // Le modèle (43 Mo) n'est chargé dans <model-viewer> qu'à ce moment précis,
+  // pas au chargement de la page : Three.js charge déjà ce même fichier pour
+  // afficher la scène, le charger une 2e fois en arrière-plan dès le départ
+  // doublait la bande passante nécessaire et bloquait l'écran de chargement.
+  // (le setter .src de <model-viewer> ne reflète pas l'attribut HTML, d'où ce flag)
+  if (!arModelRequested) {
+    arModelRequested = true;
+    // canActivateAR (notamment la génération du USDZ pour Quick Look sur iOS)
+    // n'est fiable qu'une fois le modèle chargé, donc on attend 'load' avant
+    // de tenter l'activation la première fois.
+    arViewer.addEventListener('load', tryActivateAR, { once: true });
+    arViewer.src = 'asset/model/scene-partie2.glb';
+  } else {
+    tryActivateAR();
   }
 });
 
