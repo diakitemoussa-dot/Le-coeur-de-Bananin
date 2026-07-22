@@ -561,8 +561,8 @@ function init(gltf) {
   // Conversion Blender (X, Y, Z) → Three.js (X, Z, -Y)
   textBubble = createTextBubble('clic sur l\'avion en papier pour connaitre l\'histoire du coeur de l\'univers dogon');
   scene.add(textBubble);
-  textBubble.position.set(-28.978, 4.65, 16.621);
-  textBubbleBaseY = 4.65; // Stocker la position Y de départ pour l'oscillation
+  textBubble.position.set(-28.978, 5.0, 16.621);
+  textBubbleBaseY = 5.0; // Stocker la position Y de départ pour l'oscillation
   textBubble.scale.multiplyScalar(0.2);
   textBubble.visible = true;
 
