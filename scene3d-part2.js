@@ -2,6 +2,11 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const container = document.getElementById('scene3d-part2');
 
@@ -15,9 +20,37 @@ let loadedGltf = null;
 let mixer = null;
 const clock = new THREE.Clock();
 
+// Bloom sélectif (jaunâtre, clignotant) sur le Plane uniquement : on rend deux fois
+// la scène — une fois avec tout sauf le Plane passé en noir (bloomComposer, capte
+// uniquement la lueur du Plane), une fois normalement (finalComposer), puis on
+// additionne les deux. Cf. exemple officiel three.js "selective bloom".
+const BLOOM_LAYER = 1;
+const bloomLayer = new THREE.Layers();
+bloomLayer.set(BLOOM_LAYER);
+const bloomDarkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+const bloomMaterialCache = {};
+let bloomComposer = null;
+let finalComposer = null;
+let bloomPass = null;
+
 // Raycaster pour la détection de clics sur les objets (ex: bouton Plane)
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+
+// Son joué au clic sur l'avion en papier, au moment de la transition partie 2 → partie 1.
+const TRANSITION_AUDIO = new Audio('asset/audio/transition plane 2.mp3');
+TRANSITION_AUDIO.preload = 'auto';
+let part2Muted = false;
+window.setPart2Muted = function setPart2Muted(muted) {
+  part2Muted = muted;
+  TRANSITION_AUDIO.muted = muted;
+};
+
+function playTransitionSound() {
+  TRANSITION_AUDIO.muted = part2Muted;
+  TRANSITION_AUDIO.currentTime = 0;
+  TRANSITION_AUDIO.play().catch(() => {});
+}
 
 // Suivi continu de la souris pour l'effet de dispersion des particules de poussière
 // (setupPlaneButton met à jour `mouse` uniquement au clic, on ajoute le suivi au mousemove ici).
@@ -31,9 +64,9 @@ const dustMouseIntersect = new THREE.Vector3();
 const dustMouseTarget = new THREE.Vector3();
 const dustPlaneNormal = new THREE.Vector3();
 
-// Bulle de texte et gestion de sa visibilité
+// Bulle de texte, toujours visible
 let textBubble = null;
-const BUBBLE_VISIBILITY_DISTANCE = 6; // Distance max pour voir la bulle
+let textBubbleBaseY = 0; // Position Y de départ pour l'oscillation
 
 // Contrôle de vitesse du Plane
 let planeObject = null;
@@ -114,6 +147,99 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  if (bloomComposer) bloomComposer.setSize(window.innerWidth, window.innerHeight);
+  if (finalComposer) finalComposer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// Passe additive : combine le rendu normal (baseTexture) avec la lueur isolée du
+// Plane (bloomTexture, floutée par UnrealBloomPass) pour obtenir le halo final.
+const bloomMixShader = {
+  uniforms: {
+    baseTexture: { value: null },
+    bloomTexture: { value: null },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D baseTexture;
+    uniform sampler2D bloomTexture;
+    varying vec2 vUv;
+    void main() {
+      gl_FragColor = texture2D(baseTexture, vUv) + vec4(1.0) * texture2D(bloomTexture, vUv);
+    }
+  `,
+};
+
+function setupBloom() {
+  // Deux RenderPass distincts : celui du bloomComposer force un fond NOIR (sinon
+  // le violet du fog/ciel, assez clair, dépasserait le seuil et ferait bloomer tout
+  // l'écran au lieu du seul Plane) ; celui du finalComposer garde le fond normal.
+  const bloomRenderScene = new RenderPass(scene, camera, undefined, new THREE.Color(0x000000), 1);
+  const finalRenderScene = new RenderPass(scene, camera);
+
+  bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    0.35, // strength (animée pour le clignotement)
+    0.25, // radius
+    0.35 // threshold
+  );
+
+  bloomComposer = new EffectComposer(renderer);
+  bloomComposer.renderToScreen = false;
+  bloomComposer.addPass(bloomRenderScene);
+  bloomComposer.addPass(bloomPass);
+
+  const mixPass = new ShaderPass(new THREE.ShaderMaterial(bloomMixShader), 'baseTexture');
+  mixPass.uniforms.bloomTexture.value = bloomComposer.renderTarget2.texture;
+  mixPass.needsSwap = true;
+
+  finalComposer = new EffectComposer(renderer);
+  finalComposer.addPass(finalRenderScene);
+  finalComposer.addPass(mixPass);
+  // Sans cette passe finale, le rendu composité reste en espace linéaire au lieu de
+  // la conversion sRGB/tone mapping que renderer.render() applique normalement sur
+  // le canvas : toute la scène paraît plus sombre et plate, pas seulement le Plane.
+  finalComposer.addPass(new OutputPass());
+}
+
+function darkenNonBloomed(obj) {
+  // Les sprites/points (bulle de texte, étoiles) ne sont pas des Mesh : leur matériau
+  // ne peut pas être remplacé par le matériau noir de la même façon, on les masque
+  // simplement pendant la passe de bloom pour qu'ils ne contribuent pas à la lueur
+  // (la poussière, elle, est sur le layer de bloom donc jamais masquée ici).
+  if ((obj.isSprite || obj.isPoints) && bloomLayer.test(obj.layers) === false) {
+    obj.userData.wasVisibleBeforeBloom = obj.visible;
+    obj.visible = false;
+    return;
+  }
+  if (obj.isMesh && bloomLayer.test(obj.layers) === false) {
+    bloomMaterialCache[obj.uuid] = obj.material;
+    obj.material = bloomDarkMaterial;
+  }
+}
+
+function restoreMaterial(obj) {
+  if ((obj.isSprite || obj.isPoints) && obj.userData.wasVisibleBeforeBloom !== undefined) {
+    obj.visible = obj.userData.wasVisibleBeforeBloom;
+    delete obj.userData.wasVisibleBeforeBloom;
+    return;
+  }
+  if (bloomMaterialCache[obj.uuid]) {
+    obj.material = bloomMaterialCache[obj.uuid];
+    delete bloomMaterialCache[obj.uuid];
+  }
+}
+
+function renderWithBloom() {
+  scene.traverse(darkenNonBloomed);
+  bloomComposer.render();
+  scene.traverse(restoreMaterial);
+  finalComposer.render();
 }
 
 // Position/rotation d'entrée de la caméra en partie 2, converties depuis les coordonnées
@@ -126,6 +252,20 @@ const CAMERA_ENTRY_ROTATION = new THREE.Euler(
   'XYZ'
 );
 
+// Variante caméra pour petit écran (mobile), depuis le viewport Blender :
+// Location (-19.154, -14.879, 6.2046) / Rotation (79.474°, 4.4385°, -609.97°) XYZ Euler.
+// Conversion rigoureuse Z-up (Blender) -> Y-up (Three.js) par quaternions (rotation de
+// -90° autour de X), plutôt qu'une simple réassignation d'axes, car cette caméra n'a
+// jamais été calée à l'œil dans le rendu three.js.
+const MOBILE_BREAKPOINT_PX = 700;
+const CAMERA_ENTRY_POSITION_MOBILE = new THREE.Vector3(-19.154, 6.2046, 14.879);
+const CAMERA_ENTRY_ROTATION_MOBILE = new THREE.Euler(
+  THREE.MathUtils.degToRad(-112.5108),
+  THREE.MathUtils.degToRad(69.5039),
+  THREE.MathUtils.degToRad(-167.2310),
+  'XYZ'
+);
+
 // Ciel de jour procédural (dégradé + nuages générés par bruit en shader, aucune image/
 // texture) : la partie 2 n'a plus de ciel visuel depuis la suppression de l'ancien dôme
 // GLB "WEB_Sky", elle affichait juste la couleur de fond plate du fog.
@@ -133,6 +273,22 @@ let skyMaterial = null;
 
 function setupPlaneButton(plane, onClickCallback) {
   plane.userData.isButton = true;
+  let isHoveringPlane = false;
+
+  const onMouseMove = (event) => {
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObject(plane);
+
+    const hovering = intersects.length > 0;
+    if (hovering !== isHoveringPlane) {
+      isHoveringPlane = hovering;
+      document.body.style.cursor = hovering ? 'pointer' : 'default';
+    }
+  };
+
   const onMouseClick = (event) => {
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -145,44 +301,54 @@ function setupPlaneButton(plane, onClickCallback) {
     }
   };
 
+  window.addEventListener('mousemove', onMouseMove);
   window.addEventListener('click', onMouseClick);
   plane.userData.clickListener = onMouseClick;
 }
 
 function createTextBubble(text) {
   const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 128;
+  canvas.width = 512;
+  canvas.height = 256;
   const ctx = canvas.getContext('2d');
 
-  // Fond blanc arrondi
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = '#000000';
-  ctx.lineWidth = 2;
-  const radius = 10;
+  // Ombre sous la bulle pour le relief
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+  ctx.beginPath();
+  ctx.ellipse(canvas.width / 2, canvas.height - 8, canvas.width * 0.4, 12, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Fond blanc arrondi avec dégradé léger pour le relief
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height - 24);
+  gradient.addColorStop(0, '#ffffff');
+  gradient.addColorStop(1, '#f5f5f5');
+  ctx.fillStyle = gradient;
+  ctx.strokeStyle = '#333333';
+  ctx.lineWidth = 3;
+  const radius = 20;
   ctx.beginPath();
   ctx.moveTo(radius, 0);
   ctx.lineTo(canvas.width - radius, 0);
   ctx.quadraticCurveTo(canvas.width, 0, canvas.width, radius);
-  ctx.lineTo(canvas.width, canvas.height - radius - 12);
-  ctx.quadraticCurveTo(canvas.width, canvas.height - 12, canvas.width - radius, canvas.height - 12);
-  ctx.lineTo(canvas.width * 0.6, canvas.height - 12);
+  ctx.lineTo(canvas.width, canvas.height - radius - 24);
+  ctx.quadraticCurveTo(canvas.width, canvas.height - 24, canvas.width - radius, canvas.height - 24);
+  ctx.lineTo(canvas.width * 0.6, canvas.height - 24);
   ctx.lineTo(canvas.width * 0.55, canvas.height);
-  ctx.lineTo(canvas.width * 0.5, canvas.height - 12);
-  ctx.lineTo(radius, canvas.height - 12);
-  ctx.quadraticCurveTo(0, canvas.height - 12, 0, canvas.height - radius - 12);
+  ctx.lineTo(canvas.width * 0.5, canvas.height - 24);
+  ctx.lineTo(radius, canvas.height - 24);
+  ctx.quadraticCurveTo(0, canvas.height - 24, 0, canvas.height - radius - 24);
   ctx.lineTo(0, radius);
   ctx.quadraticCurveTo(0, 0, radius, 0);
   ctx.fill();
   ctx.stroke();
 
   // Texte noir, avec retour à la ligne automatique pour les phrases longues
-  ctx.fillStyle = '#000000';
-  ctx.font = 'bold 20px Arial';
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = 'bold 32px Arial';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  const maxTextWidth = canvas.width - 24;
+  const maxTextWidth = canvas.width - 48;
   const words = text.split(' ');
   const lines = [];
   let currentLine = '';
@@ -197,8 +363,8 @@ function createTextBubble(text) {
   });
   if (currentLine) lines.push(currentLine);
 
-  const lineHeight = 22;
-  const textAreaCenterY = (canvas.height - 12) / 2;
+  const lineHeight = 44;
+  const textAreaCenterY = (canvas.height - 24) / 2;
   const startY = textAreaCenterY - ((lines.length - 1) * lineHeight) / 2;
   lines.forEach((line, i) => {
     ctx.fillText(line, canvas.width / 2, startY + i * lineHeight);
@@ -207,7 +373,7 @@ function createTextBubble(text) {
   const texture = new THREE.CanvasTexture(canvas);
   const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
   const sprite = new THREE.Sprite(spriteMaterial);
-  sprite.scale.set(3, 1.5, 1);
+  sprite.scale.set(4, 2, 1);
   return sprite;
 }
 
@@ -217,12 +383,12 @@ function createProceduralSky() {
   skyMaterial = new THREE.ShaderMaterial({
     uniforms: {
       time: { value: 0 },
-      horizonColor: { value: new THREE.Color(0xfef2d8) },
-      zenithColor: { value: new THREE.Color(0x5f86c9) },
-      // Teinte basse crème/dorée mais légèrement assombrie (au lieu du violet du fog),
-      // pour un horizon chaud sans être trop clair ni trop sombre.
-      lowSkyColor: { value: new THREE.Color(0xcdb888) },
-      cloudColor: { value: new THREE.Color(0xfffaf0) },
+      // Palette assombrie "galaxie" : indigo profond au zénith, prune sombre à
+      // l'horizon, nuages gris-violet discrets plutôt que blancs et lumineux.
+      horizonColor: { value: new THREE.Color(0x2a1f3d) },
+      zenithColor: { value: new THREE.Color(0x0c0a18) },
+      lowSkyColor: { value: new THREE.Color(0x3a2a34) },
+      cloudColor: { value: new THREE.Color(0x6a5d78) },
     },
     vertexShader: `
       varying vec3 vWorldDir;
@@ -294,11 +460,71 @@ function createProceduralSky() {
   return mesh;
 }
 
+let starMaterial = null;
+
+// Étoiles fixes réparties sur la moitié haute du dôme (ciel assombri "galaxie") :
+// scintillement doux et indépendant par étoile (déphasage aléatoire par sommet).
+function createStarField() {
+  const STAR_COUNT = 900;
+  const positions = new Float32Array(STAR_COUNT * 3);
+  const seeds = new Float32Array(STAR_COUNT);
+
+  for (let i = 0; i < STAR_COUNT; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    // cos(phi) borné à [0, 1] : uniquement l'hémisphère supérieur du dôme.
+    const phi = Math.acos(Math.random());
+    const r = 390;
+    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = r * Math.cos(phi);
+    positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+    seeds[i] = Math.random() * Math.PI * 2;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('seed', new THREE.BufferAttribute(seeds, 1));
+
+  starMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      time: { value: 0 },
+    },
+    vertexShader: `
+      attribute float seed;
+      uniform float time;
+      varying float vTwinkle;
+      void main() {
+        vTwinkle = 0.55 + 0.45 * sin(time * 1.6 + seed * 6.2831);
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        gl_PointSize = (1.2 + 1.3 * vTwinkle) * (300.0 / -mvPosition.z);
+      }
+    `,
+    fragmentShader: `
+      varying float vTwinkle;
+      void main() {
+        vec2 center = gl_PointCoord - 0.5;
+        float dist = length(center);
+        if (dist > 0.5) discard;
+        float alpha = (1.0 - dist * 2.0) * vTwinkle;
+        gl_FragColor = vec4(vec3(1.0, 0.98, 0.9), alpha);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+
+  const stars = new THREE.Points(geometry, starMaterial);
+  stars.renderOrder = -999;
+  return stars;
+}
+
 function init(gltf) {
   scene = gltf.scene;
   camera = findCamera(gltf) || new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.copy(CAMERA_ENTRY_POSITION);
-  camera.rotation.copy(CAMERA_ENTRY_ROTATION);
+  const isMobileScreen = window.innerWidth <= MOBILE_BREAKPOINT_PX;
+  camera.position.copy(isMobileScreen ? CAMERA_ENTRY_POSITION_MOBILE : CAMERA_ENTRY_POSITION);
+  camera.rotation.copy(isMobileScreen ? CAMERA_ENTRY_ROTATION_MOBILE : CAMERA_ENTRY_ROTATION);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   makeShadable(gltf);
@@ -307,6 +533,7 @@ function init(gltf) {
   const FOG_COLOR = 0x55415d;
   scene.fog = new THREE.FogExp2(FOG_COLOR, 0.035);
   scene.add(createProceduralSky());
+  scene.add(createStarField());
   camera.far = Math.max(camera.far, 500);
   camera.updateProjectionMatrix();
 
@@ -332,24 +559,26 @@ function init(gltf) {
 
   // Bulle aux coordonnées précises (depuis Blender, converties en Three.js)
   // Conversion Blender (X, Y, Z) → Three.js (X, Z, -Y)
-  textBubble = createTextBubble('clique sur l\'avion en papier et découvre !');
+  textBubble = createTextBubble('clic sur l\'avion en papier pour connaitre l\'histoire du coeur de l\'univers dogon');
   scene.add(textBubble);
   textBubble.position.set(-28.978, 4.65, 16.621);
-  textBubble.scale.multiplyScalar(0.15);
-  textBubble.visible = false;
+  textBubbleBaseY = 4.65; // Stocker la position Y de départ pour l'oscillation
+  textBubble.scale.multiplyScalar(0.2);
+  textBubble.visible = true;
 
   // Configuration du Plane comme bouton interactif pour naviguer vers la partie 1
   planeObject = gltf.scene.getObjectByName('plane');
   if (planeObject) {
     setupPlaneButton(planeObject, () => {
-      // Naviguer vers la partie 1
+      // Son de transition joué au clic, puis navigation vers la partie 1
+      playTransitionSound();
       if (typeof window.goToPart1 === 'function') {
         window.goToPart1();
       }
     });
-
-    // Configurer le slider de vitesse du Plane
 }
+
+  setupBloom();
 
   // Toutes les animations du modèle jouent en boucle continue, indépendamment du scroll.
   if (gltf.animations && gltf.animations.length) {
@@ -376,6 +605,7 @@ function init(gltf) {
     preventTerrainClipping();
     if (mixer) mixer.update(clock.getDelta());
     if (skyMaterial) skyMaterial.uniforms.time.value = clock.elapsedTime;
+    if (starMaterial) starMaterial.uniforms.time.value = clock.elapsedTime;
 
     // Mettre à jour les particules de poussière
     if (window.dustParticles && window.dustParticles.userData.dustMaterial) {
@@ -422,18 +652,40 @@ function init(gltf) {
       if (dustMoved) posAttr.needsUpdate = true;
     }
 
-    // Gestion de la visibilité de la bulle selon la distance caméra
-    if (textBubble) {
-      const distance = camera.position.distanceTo(textBubble.position);
-      textBubble.visible = distance < BUBBLE_VISIBILITY_DISTANCE;
-    }
-
     // Rotation lente et constante du Plane
     if (planeObject) {
       planeObject.rotation.z += 0.01;
     }
 
-    renderer.render(scene, camera);
+    // Animation de la bulle : oscillation douce de droite à gauche pour attirer l'attention
+    if (textBubble) {
+      const t = clock.elapsedTime;
+      // Mouvement lent et fluide en X (droite-gauche) : ±0.12 unités à 1.5 Hz
+      textBubble.position.x = -28.978 + Math.sin(t * 1.5) * 0.12;
+      // Position Y stable, pas de mouvement vertical
+      textBubble.position.y = textBubbleBaseY;
+      // Rotation très subtile qui suit le mouvement horizontal
+      textBubble.rotation.z = Math.sin(t * 1.5) * 0.04;
+    }
+
+    // Clignotement continu du halo jaune sur la poussière : lueur toujours forte,
+    // jamais éteinte, avec un scintillement irrégulier (deux sinusoïdes déphasées
+    // + un peu de bruit).
+    if (bloomPass) {
+      const t = clock.elapsedTime;
+      const flicker =
+        0.6 +
+        0.25 * Math.sin(t * 9.5) +
+        0.15 * Math.sin(t * 23.7 + 1.3) +
+        0.15 * Math.random();
+      bloomPass.strength = 0.15 + flicker * 0.25;
+    }
+
+    if (bloomComposer && finalComposer) {
+      renderWithBloom();
+    } else {
+      renderer.render(scene, camera);
+    }
   });
 }
 
@@ -499,8 +751,11 @@ function createDustParticles(scene) {
     oscillationSpeed: 0.3,
     oscillationAmount: 2,
     opacity: 0.4,
-    particleSize: 1.0,
-    color: new THREE.Color(200 / 255, 200 / 255, 200 / 255),
+    particleSize: 0.7,
+    // Blanc volontairement "HDR" (>1.0) : les particules sont additive-blend et
+    // atténuées par l'alpha, il faut dépasser cette perte pour franchir le seuil
+    // du bloom et produire un halo visible.
+    color: new THREE.Color(2.0, 2.0, 2.0),
     // Rayon d'influence du curseur et force de dispersion des particules proches
     mouseRadius: 2.2,
     mouseStrength: 1.6
@@ -539,11 +794,24 @@ function createDustParticles(scene) {
     uniform float mouseStrength;
 
     void main() {
-      // La position vient directement de l'attribut, déplacé de façon permanente
-      // côté CPU quand le curseur pousse une particule : pas de gravité, pas
-      // d'oscillation et pas de répulsion temporaire ici, pour qu'une particule
-      // poussée reste exactement là où elle a été poussée.
+      // La position part de l'attribut (déplacé de façon permanente côté CPU
+      // quand le curseur pousse une particule), puis on ajoute un mouvement
+      // ambiant doux : gravité + oscillation. Pas de répulsion temporaire ici
+      // (gérée uniquement côté CPU) pour qu'une particule poussée reste bien
+      // à son nouvel emplacement, simplement animée autour de celui-ci.
       vec3 pos = position;
+
+      // Gravité : descente lente et cyclique
+      pos.y -= time * speed * gravity;
+
+      // Régénération : quand y trop bas, remonter au sommet
+      if (pos.y < -radius * 1.5) {
+        pos.y = radius;
+      }
+
+      // Oscillation horizontale (flottement naturel)
+      pos.x += sin(time * oscillationSpeed + position.z * 0.1) * oscillationAmount;
+      pos.z += cos(time * oscillationSpeed * 0.7 + position.x * 0.1) * oscillationAmount;
 
       // Projection caméra
       vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
@@ -599,6 +867,8 @@ function createDustParticles(scene) {
   // Créer le mesh Points
   const dustParticles = new THREE.Points(geometry, material);
   dustParticles.userData.dustMaterial = material;
+  // Sur le layer de bloom : c'est la poussière (et plus le Plane) qui reçoit le halo.
+  dustParticles.layers.enable(BLOOM_LAYER);
 
   return dustParticles;
 }
@@ -621,28 +891,30 @@ window.setScene3DPart2Visible = function setScene3DPart2Visible(visible) {
   }
 };
 
-// Fonction pour naviguer vers la partie 1
-window.goToPart1 = function goToPart1() {
-  const revealPart1 = () => {
-    container.classList.remove('visible');
-    container.hidden = true;
-    const scene3dDiv = document.getElementById('scene3d');
-    if (scene3dDiv) {
-      scene3dDiv.hidden = false;
-      if (typeof window.playRevealAnimation === 'function') {
-        window.playRevealAnimation();
-      }
-      if (typeof window.startScene3D === 'function') {
-        window.startScene3D();
-      }
-      scene3dDiv.classList.add('visible');
-    }
-  };
+// Fonction pour naviguer vers la partie 1 : un fondu croisé doux (pas d'overlay,
+// pas de vidéo), la partie 2 s'efface pendant que la partie 1 apparaît dessous.
+const PART2_FADE_OUT_MS = 1200; // doit rester synchronisé avec la transition CSS de #scene3d-part2
 
-  if (typeof window.playPaperUnfoldTransition === 'function') {
-    window.playPaperUnfoldTransition(revealPart1);
-  } else {
-    // Fallback si paper-transition.js n'a pas chargé : comportement direct.
-    revealPart1();
+window.goToPart1 = function goToPart1() {
+  container.classList.remove('visible');
+
+  const scene3dDiv = document.getElementById('scene3d');
+  if (scene3dDiv) {
+    scene3dDiv.hidden = false;
+    // Forcer un reflow avant d'ajouter 'visible' : sinon le navigateur applique
+    // hidden=false et opacity:1 dans la même frame, et le fondu (transition CSS)
+    // ne se joue pas, l'image apparaît d'un coup.
+    void scene3dDiv.offsetWidth;
+    if (typeof window.playRevealAnimation === 'function') {
+      window.playRevealAnimation();
+    }
+    if (typeof window.startScene3D === 'function') {
+      window.startScene3D();
+    }
+    requestAnimationFrame(() => scene3dDiv.classList.add('visible'));
   }
+
+  setTimeout(() => {
+    container.hidden = true;
+  }, PART2_FADE_OUT_MS);
 };

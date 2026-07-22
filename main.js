@@ -1,3 +1,7 @@
+import './loading-animation.js';
+import './scene3d.js';
+import './scene3d-part2.js';
+
 const ASSETS_TO_PRELOAD = [
   'asset/image/la coline ..jpg',
   'asset/image/la falaise ..png',
@@ -24,6 +28,10 @@ ambientAudio.loop = true;
 ambientAudio.preload = 'auto';
 ambientAudio.volume = 0;
 
+// Son joué à l'entrée dans la partie 2 (juste après le chargement).
+const entranceAudio = new Audio("asset/audio/son d'entre.mp3");
+entranceAudio.preload = 'auto';
+
 const AMBIENT_BASE_VOLUME = 0.28;
 const AMBIENT_FADE_IN_MS = 2500;
 // Impression de vitesse : quand l'utilisateur scrolle vite, le vent souffle plus fort
@@ -40,8 +48,12 @@ let audioMuted = false;
 
 function applyMuteState() {
   ambientAudio.muted = audioMuted;
+  entranceAudio.muted = audioMuted;
   if (typeof window.setChirpMuted === 'function') {
     window.setChirpMuted(audioMuted);
+  }
+  if (typeof window.setPart2Muted === 'function') {
+    window.setPart2Muted(audioMuted);
   }
 }
 
@@ -112,6 +124,47 @@ const AMBIENT_UNLOCK_EVENTS = ['pointerdown', 'click', 'keydown', 'touchstart'];
 AMBIENT_UNLOCK_EVENTS.forEach((evt) => {
   window.addEventListener(evt, tryStartAmbient, { passive: true });
 });
+
+// Le son d'entrée doit démarrer exactement au moment de l'entrée dans la partie 2,
+// pas au prochain geste (contrairement à l'ambiance de vent, qui peut attendre sans
+// problème). Comme cette entrée n'est pas déclenchée par un clic, le navigateur bloque
+// souvent la lecture avec son à cet instant précis. Pour rester synchronisé malgré ce
+// blocage, on démarre le son MUET (l'autoplay muet n'est jamais bloqué) puis on le
+// démasque dès le premier vrai geste utilisateur, sans le relancer plus tard.
+//
+// Un son muet qu'on ne fait que "démasquer" reste inaudible si sa lecture (muette)
+// est déjà terminée au moment du geste (fichier court, utilisateur qui met du temps
+// à interagir) : démasquer un son fini ne produit aucun son. Dans ce cas, on le
+// relance depuis le début, cette fois audible — mieux vaut l'entendre en retard que
+// jamais.
+let entrancePlayed = false;
+
+function unmuteEntranceSound() {
+  AMBIENT_UNLOCK_EVENTS.forEach((evt) => {
+    window.removeEventListener(evt, unmuteEntranceSound);
+  });
+  entranceAudio.muted = audioMuted;
+  if (entranceAudio.ended) {
+    entranceAudio.currentTime = 0;
+    entranceAudio.play().catch(() => {});
+  }
+}
+
+function tryPlayEntranceSound() {
+  if (entrancePlayed) return;
+  entrancePlayed = true;
+  entranceAudio.currentTime = 0;
+  entranceAudio.muted = audioMuted;
+  entranceAudio.play().catch(() => {
+    // Lecture avec son bloquée : démarrer muet pour rester synchronisé avec l'entrée,
+    // puis démasquer dès le premier geste utilisateur réel.
+    entranceAudio.muted = true;
+    entranceAudio.play().catch(() => {});
+    AMBIENT_UNLOCK_EVENTS.forEach((evt) => {
+      window.addEventListener(evt, unmuteEntranceSound, { passive: true });
+    });
+  });
+}
 
 const audioToggleBtn = document.getElementById('audio-toggle');
 audioToggleBtn.addEventListener('click', () => {
@@ -201,6 +254,7 @@ function transitionToScene3D() {
   scene3dPart2.hidden = false;
   scene3dPart2.classList.add('visible');
   scrollSpace.style.height = `${window.innerHeight * SCROLL_SPACE_MULTIPLIER}px`;
+  tryPlayEntranceSound();
   if (typeof window.startScene3DPart2 === 'function') {
     window.startScene3DPart2();
   }
@@ -231,3 +285,64 @@ function waitForScene3DReady() {
   }
 }
 waitForScene3DReady();
+
+// Gestion de l'écran de fin de chapitre avec bouton "Dôgo kun soro"
+const endChapterScreen = document.getElementById('end-chapter-screen');
+const dogoBtn = document.getElementById('dogo-kun-soro-btn');
+let endChapterShown = false;
+
+window.addEventListener('scroll', () => {
+  if (!endChapterShown && scrollSpace) {
+    const scrollHeight = scrollSpace.offsetHeight;
+    const scrolledAmount = window.scrollY + window.innerHeight;
+    const scrollProgress = scrolledAmount / scrollHeight;
+
+    // Afficher le bouton quand l'utilisateur a scrollé à 95% ou plus
+    if (scrollProgress >= 0.95) {
+      endChapterShown = true;
+      endChapterScreen.classList.add('visible');
+    }
+  }
+});
+
+// Placeholder pour le lien du bouton (à remplir avec ton URL)
+dogoBtn.addEventListener('click', () => {
+  // window.location.href = 'URL_À_REMPLIR'; // À remplacer par le vrai lien
+  console.log('Bouton Dôgo kun soro cliqué !');
+});
+
+// Bouton AR - Réalité augmentée native (iOS Quick Look / Android Scene Viewer via <model-viewer>)
+const arButton = document.getElementById('ar-button');
+const arViewer = document.getElementById('ar-viewer');
+const arIncompatibilityScreen = document.getElementById('ar-incompatibility-screen');
+const arIncompatibilityBtn = document.getElementById('ar-incompatibility-btn');
+
+arButton.addEventListener('click', () => {
+  if (arViewer && arViewer.canActivateAR) {
+    arViewer.activateAR();
+  } else {
+    arIncompatibilityScreen.classList.remove('hidden');
+    arIncompatibilityScreen.classList.add('visible');
+  }
+});
+
+// Bouton OK pour fermer l'écran d'incompatibilité AR
+arIncompatibilityBtn.addEventListener('click', () => {
+  arIncompatibilityScreen.classList.remove('visible');
+  arIncompatibilityScreen.classList.add('hidden');
+});
+
+// Bouton Retour - Retourner à Partie 1 depuis l'écran DOGOKUN SORO
+const returnBtn = document.getElementById('return-btn');
+returnBtn.addEventListener('click', () => {
+  // Cacher l'écran de fin et revenir à Partie 1
+  endChapterScreen.classList.remove('visible');
+  window.scrollTo(0, 0);
+  endChapterShown = false;
+  // scrollTo(0,0) seul ne révèle pas #scene3d : sans clic préalable sur l'avion
+  // en papier, cette div est toujours hidden=true et #scene3d-part2 reste affiché.
+  // On réutilise la même transition que le clic sur l'avion pour vraiment basculer.
+  if (typeof window.goToPart1 === 'function') {
+    window.goToPart1();
+  }
+});

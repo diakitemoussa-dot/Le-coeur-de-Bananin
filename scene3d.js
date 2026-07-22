@@ -39,6 +39,136 @@ let startTime = 0;
 const BIRD_COUNT = 10;
 const birds = [];
 
+let arBubble = null;
+let arBubbleBaseY = 0;
+
+function createTextBubble(text) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+
+  // Fond blanc arrondi
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 2;
+  const radius = 10;
+  ctx.beginPath();
+  ctx.moveTo(radius, 0);
+  ctx.lineTo(canvas.width - radius, 0);
+  ctx.quadraticCurveTo(canvas.width, 0, canvas.width, radius);
+  ctx.lineTo(canvas.width, canvas.height - radius - 12);
+  ctx.quadraticCurveTo(canvas.width, canvas.height - 12, canvas.width - radius, canvas.height - 12);
+  ctx.lineTo(canvas.width * 0.6, canvas.height - 12);
+  ctx.lineTo(canvas.width * 0.55, canvas.height);
+  ctx.lineTo(canvas.width * 0.5, canvas.height - 12);
+  ctx.lineTo(radius, canvas.height - 12);
+  ctx.quadraticCurveTo(0, canvas.height - 12, 0, canvas.height - radius - 12);
+  ctx.lineTo(0, radius);
+  ctx.quadraticCurveTo(0, 0, radius, 0);
+  ctx.fill();
+  ctx.stroke();
+
+  // Texte noir, avec retour à la ligne automatique pour les phrases longues
+  ctx.fillStyle = '#000000';
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const maxTextWidth = canvas.width - 24;
+  const words = text.split(' ');
+  const lines = [];
+  let currentLine = '';
+  words.forEach((word) => {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    if (ctx.measureText(testLine).width > maxTextWidth && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = testLine;
+    }
+  });
+  if (currentLine) lines.push(currentLine);
+
+  const lineHeight = 22;
+  const textAreaCenterY = (canvas.height - 12) / 2;
+  const startY = textAreaCenterY - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((line, i) => {
+    ctx.fillText(line, canvas.width / 2, startY + i * lineHeight);
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+  const sprite = new THREE.Sprite(spriteMaterial);
+  sprite.scale.set(3, 1.5, 1);
+  return sprite;
+}
+
+function createARTextBubble(text) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+
+  // Dégradé chaud (orange/doré) pour différencier visiblement de la bulle standard
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height - 12);
+  gradient.addColorStop(0, '#ffd89b');
+  gradient.addColorStop(1, '#ffb366');
+  ctx.fillStyle = gradient;
+  ctx.strokeStyle = '#ff8c42';
+  ctx.lineWidth = 3;
+  const radius = 10;
+  ctx.beginPath();
+  ctx.moveTo(radius, 0);
+  ctx.lineTo(canvas.width - radius, 0);
+  ctx.quadraticCurveTo(canvas.width, 0, canvas.width, radius);
+  ctx.lineTo(canvas.width, canvas.height - radius - 12);
+  ctx.quadraticCurveTo(canvas.width, canvas.height - 12, canvas.width - radius, canvas.height - 12);
+  ctx.lineTo(canvas.width * 0.6, canvas.height - 12);
+  ctx.lineTo(canvas.width * 0.55, canvas.height);
+  ctx.lineTo(canvas.width * 0.5, canvas.height - 12);
+  ctx.lineTo(radius, canvas.height - 12);
+  ctx.quadraticCurveTo(0, canvas.height - 12, 0, canvas.height - radius - 12);
+  ctx.lineTo(0, radius);
+  ctx.quadraticCurveTo(0, 0, radius, 0);
+  ctx.fill();
+  ctx.stroke();
+
+  // Texte blanc/clair (plus visible sur fond chaud)
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const maxTextWidth = canvas.width - 24;
+  const words = text.split(' ');
+  const lines = [];
+  let currentLine = '';
+  words.forEach((word) => {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    if (ctx.measureText(testLine).width > maxTextWidth && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = testLine;
+    }
+  });
+  if (currentLine) lines.push(currentLine);
+
+  const lineHeight = 22;
+  const textAreaCenterY = (canvas.height - 12) / 2;
+  const startY = textAreaCenterY - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((line, i) => {
+    ctx.fillText(line, canvas.width / 2, startY + i * lineHeight);
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+  const sprite = new THREE.Sprite(spriteMaterial);
+  sprite.scale.set(3, 1.5, 1);
+  return sprite;
+}
+
 function wrapRange(value, range) {
   const span = range * 2;
   return (((value % span) + span) % span) - range;
@@ -105,6 +235,7 @@ window.setChirpMuted = function setChirpMuted(muted) {
     pool.forEach((audio) => { audio.muted = muted; });
   });
   BIKE_BELL_AUDIO.muted = muted;
+  STORY_SOUNDS.forEach((sound) => { sound.audio.muted = muted; });
 };
 
 function playBirdChirp() {
@@ -164,6 +295,85 @@ function maybeTriggerBikeBell(progress) {
   const isAbove = progress >= BIKE_BELL_PROGRESS;
   if (wasAbove !== isAbove) playBikeBell();
   bikeBellLastProgress = progress;
+}
+
+// Sons des textes narratifs : boucle tant que l'utilisateur reste immobile dans la section,
+// fade out progressif dès qu'il scrolle ou quitte la section.
+//
+// IMPORTANT : ce système est piloté par la boucle de rendu (à chaque frame), PAS par les
+// events 'scroll'. Les events 'scroll' ne se déclenchent plus une fois que l'utilisateur
+// arrête de bouger — si on pilotait le fade depuis 'scroll', il se figerait dès que le
+// scroll s'arrête (le volume resterait bloqué à mi-fondu et le son boucler indéfiniment).
+// En pilotant depuis le render loop (qui tourne en continu), le fade progresse dans le
+// temps même sans nouvel event de scroll, et l'immobilité se mesure par un vrai délai.
+const STORY_SOUNDS = [
+  {
+    start: 0.12,
+    end: 0.155, // doit correspondre à la plage de story-text-3 dans STORY_TEXTS
+    audio: new Audio('asset/audio/pilon (1).mp3'),
+    state: 'idle', // idle | playing | fading
+    baseVolume: 0.5,
+    fadeOutDuration: 800, // ms
+    fadeOutStart: null,
+  }, // story-text-3
+];
+
+STORY_SOUNDS.forEach((sound) => {
+  sound.audio.preload = 'auto';
+  sound.audio.loop = true;
+});
+
+// Délai sans event 'scroll' au bout duquel on considère l'utilisateur immobile.
+const SCROLL_IDLE_DELAY_MS = 150;
+let lastScrollEventTime = performance.now();
+
+function updateStorySounds() {
+  const progress = getScrollProgress();
+  const isIdle = performance.now() - lastScrollEventTime > SCROLL_IDLE_DELAY_MS;
+
+  STORY_SOUNDS.forEach((sound) => {
+    const isInSection = progress >= sound.start && progress <= sound.end;
+
+    if (isInSection && sound.state === 'idle') {
+      // Entrer dans la section : démarrer le son
+      sound.state = 'playing';
+      sound.audio.muted = chirpsMuted;
+      sound.audio.volume = sound.baseVolume;
+      sound.audio.currentTime = 0;
+      sound.audio.play().catch(() => {});
+    } else if (isInSection && sound.state === 'playing') {
+      if (isIdle) {
+        // Utilisateur immobile dans la section : laisser le son boucler
+        sound.audio.volume = sound.baseVolume;
+      } else {
+        // Utilisateur en train de scroller : commencer le fade out
+        sound.state = 'fading';
+        sound.fadeOutStart = performance.now();
+      }
+    } else if (!isInSection && sound.state === 'playing') {
+      // Quitter la section : commencer immédiatement le fade out
+      sound.state = 'fading';
+      sound.fadeOutStart = performance.now();
+    } else if (sound.state === 'fading') {
+      // Pendant le fade out : réduire progressivement le volume, frame après frame,
+      // que le scroll continue ou non.
+      const elapsed = performance.now() - sound.fadeOutStart;
+      const fadeProgress = Math.min(elapsed / sound.fadeOutDuration, 1);
+      sound.audio.volume = sound.baseVolume * (1 - fadeProgress);
+
+      if (fadeProgress >= 1) {
+        // Fade out terminé : arrêter le son
+        sound.audio.pause();
+        sound.audio.currentTime = 0;
+        sound.state = 'idle';
+      } else if (isInSection && isIdle) {
+        // L'utilisateur est revenu immobile dans la section avant la fin du fade :
+        // reprendre en boucle au volume normal plutôt que de finir de s'éteindre.
+        sound.state = 'playing';
+        sound.audio.volume = sound.baseVolume;
+      }
+    }
+  });
 }
 
 function createBirds() {
@@ -245,6 +455,8 @@ function onMouseMove(event) {
 }
 
 function applyParallaxAndRender() {
+  updateStorySounds();
+
   // Si la souris est immobile depuis un court instant, la cible revient au centre.
   if (performance.now() - lastMoveTime > IDLE_DELAY_MS) {
     mouseTarget.x *= IDLE_RECENTER;
@@ -266,6 +478,15 @@ function applyParallaxAndRender() {
   camera.quaternion.copy(baseQuaternion).multiply(tiltQuaternion);
 
   updateBirds((performance.now() - startTime) / 1000);
+
+  // Animation de la bulle AR : oscillation Y (flottement vertical) + rotation Z douce
+  if (arBubble) {
+    const t = (performance.now() - startTime) / 1000;
+    // Oscillation Y pour un flottement doux (±0.3 unités à 1 Hz)
+    arBubble.position.y = arBubbleBaseY + Math.sin(t * 1) * 0.3;
+    // Rotation Z subtile qui suit le mouvement
+    arBubble.rotation.z = Math.sin(t * 1) * 0.05;
+  }
 
   renderer.render(scene, camera);
 }
@@ -425,6 +646,7 @@ function updateWindSpeedFromScroll() {
 
 let rafPending = false;
 function onScroll() {
+  lastScrollEventTime = performance.now();
   updateWindSpeedFromScroll();
   if (rafPending) return;
   rafPending = true;
@@ -461,6 +683,13 @@ function init(gltf) {
     });
     timelineDuration = Math.max(...gltf.animations.map((clip) => clip.duration));
   }
+
+  // Créer la bulle AR avec le message d'instruction (design chaud/doré différencié)
+  arBubble = createARTextBubble("n'oublie pas que clic sur le AR pour me place dans ton monde réel");
+  scene.add(arBubble);
+  arBubble.position.set(-15, 3.5, 15);
+  arBubbleBaseY = arBubble.position.y;
+  arBubble.scale.set(0.25, 0.25, 0.25);
 
   window.addEventListener('resize', onResize);
   window.addEventListener('scroll', onScroll, { passive: true });

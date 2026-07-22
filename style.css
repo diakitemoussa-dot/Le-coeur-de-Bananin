@@ -203,8 +203,8 @@ body {
   font-family: 'Caveat', cursive;
   font-weight: 700;
   font-size: clamp(3.6rem, 8vw, 5.2rem);
-  color: #2f3b45;
-  text-shadow: 0 1px 0 rgba(47, 59, 69, 0.15);
+  color: #55415d;
+  text-shadow: 0 1px 0 rgba(85, 65, 93, 0.15);
   margin: 0 0 14px;
 }
 
@@ -487,78 +487,381 @@ body {
   height: 100%;
 }
 
-/* Barre de contrôle de vitesse du Plane */
-
-/* Transition "dépliage de papier" entre partie 2 et partie 1 */
-#paper-unfold-overlay {
+/* Écran de fin de chapitre avec bouton "Dôgo kun soro" */
+.end-chapter-screen {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
   display: flex;
-  z-index: 9999;
-  pointer-events: none;
-}
-
-#paper-unfold-overlay[hidden] {
-  display: none;
-}
-
-#paper-unfold-overlay.fading-out {
-  transition: opacity 725ms ease-in-out;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f4efe6 0%, #e8dcd0 100%);
+  z-index: 100;
   opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.8s ease;
 }
 
-.paper-strip {
-  flex: 1 1 0;
+.end-chapter-screen.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dogo-btn {
+  padding: 25px 50px;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #55415d;
+  background: transparent;
+  border: 3px solid #55415d;
+  cursor: pointer;
+  font-family: 'Orbitron', 'Share Tech Mono', monospace;
+  transition: all 0.4s ease;
+  position: relative;
+  overflow: hidden;
+  text-transform: uppercase;
+  box-shadow: 0 4px 15px rgba(85, 65, 93, 0.1);
+  line-height: 1.4;
+}
+
+.dogo-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
   height: 100%;
-  background: #ffffff;
-  transform: scaleX(0);
+  background: #55415d;
+  z-index: -1;
+  transition: left 0.4s ease;
 }
 
-.paper-strip--left {
-  transform-origin: right center;
+.dogo-btn:hover {
+  color: #f4efe6;
+  box-shadow: 0 8px 30px rgba(85, 65, 93, 0.3);
+  transform: translateY(-2px);
 }
 
-.paper-strip--right {
-  transform-origin: left center;
+.dogo-btn:hover::before {
+  left: 0;
 }
 
-@keyframes paper-strip-unfold-left {
+.dogo-btn:active {
+  transform: translateY(0);
+}
+
+/* Bouton Retour */
+.return-btn {
+  padding: 14px 35px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  color: #55415d;
+  background: transparent;
+  border: 2px solid #55415d;
+  cursor: pointer;
+  font-family: 'Orbitron', 'Share Tech Mono', monospace;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px rgba(85, 65, 93, 0.08);
+}
+
+.return-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: #55415d;
+  z-index: -1;
+  transition: left 0.3s ease;
+}
+
+.return-btn:hover {
+  color: #f4efe6;
+  box-shadow: 0 4px 15px rgba(85, 65, 93, 0.2);
+  transform: translateX(-2px);
+}
+
+.return-btn:hover::before {
+  left: 0;
+}
+
+.return-btn:active {
+  transform: translateX(0) scale(0.98);
+}
+
+/* Conteneur et logo pour "Dôgo kun soro" */
+.dogo-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 25px;
+}
+
+.dogo-buttons-group {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.dogo-logo {
+  width: 220px;
+  height: 220px;
+  object-fit: contain;
+  opacity: 0;
+  animation: fadeInDown 0.8s ease 0.3s forwards;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Bouton AR - Réalité augmentée */
+.ar-button {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #55415d;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.6s ease;
+  box-shadow: 0 4px 16px rgba(85, 65, 93, 0.25);
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+}
+
+#scene3d-part2 .ar-button {
+  opacity: 1;
+  pointer-events: auto;
+  animation: arBounceGlow 3s ease-in-out infinite;
+}
+
+.ar-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.ar-text {
+  color: #f4efe6;
+  text-transform: uppercase;
+  display: inline-block;
+}
+
+/* Animation cool : bounce + pulse glow */
+@keyframes arBounceGlow {
   0% {
-    transform: scaleX(0) rotateY(-40deg);
+    transform: translateY(0px);
+    box-shadow: 0 4px 16px rgba(85, 65, 93, 0.25),
+                0 0 0 0px rgba(85, 65, 93, 0.4);
+  }
+  50% {
+    transform: translateY(-6px);
+    box-shadow: 0 8px 24px rgba(85, 65, 93, 0.35),
+                0 0 0 10px rgba(85, 65, 93, 0.15);
   }
   100% {
-    transform: scaleX(1) rotateY(0deg);
+    transform: translateY(0px);
+    box-shadow: 0 4px 16px rgba(85, 65, 93, 0.25),
+                0 0 0 0px rgba(85, 65, 93, 0);
   }
 }
 
-@keyframes paper-strip-unfold-right {
-  0% {
-    transform: scaleX(0) rotateY(40deg);
+.ar-button:hover {
+  background: #6b5273;
+  box-shadow: 0 6px 24px rgba(85, 65, 93, 0.4);
+  transform: translateY(-2px);
+  animation: arBounceGlow 2s ease-in-out infinite;
+}
+
+.ar-button:active {
+  transform: scale(0.96);
+}
+
+/* Écran d'incompatibilité AR - DOGOKUN SORO style */
+.ar-incompatibility-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f4efe6 0%, #e8dcd0 100%);
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.8s ease;
+}
+
+.ar-incompatibility-screen.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ar-incompatibility-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+  max-width: 90%;
+  text-align: center;
+}
+
+.ar-incompatibility-logo {
+  width: 220px;
+  height: 220px;
+  object-fit: contain;
+  opacity: 0;
+  animation: fadeInDown 0.8s ease 0.2s forwards;
+}
+
+.ar-incompatibility-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+  width: 100%;
+}
+
+.ar-incompatibility-message {
+  font-family: 'Caveat', cursive;
+  font-weight: 700;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  color: #55415d;
+  line-height: 1.4;
+  margin: 0;
+  letter-spacing: 0.5px;
+  opacity: 0;
+  animation: fadeInUp 0.8s ease 0.4s forwards;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
   }
-  100% {
-    transform: scaleX(1) rotateY(0deg);
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-#paper-unfold-overlay.unfolding .paper-strip--left {
-  animation-name: paper-strip-unfold-left;
-  animation-duration: 700ms;
-  animation-timing-function: ease-out;
-  animation-fill-mode: forwards;
+.ar-incompatibility-ok-btn {
+  padding: 18px 50px;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #55415d;
+  background: transparent;
+  border: 3px solid #55415d;
+  cursor: pointer;
+  font-family: 'Orbitron', 'Share Tech Mono', monospace;
+  transition: all 0.4s ease;
+  position: relative;
+  overflow: hidden;
+  text-transform: uppercase;
+  box-shadow: 0 4px 15px rgba(85, 65, 93, 0.1);
+  opacity: 0;
+  animation: fadeIn 0.8s ease 0.6s forwards;
 }
 
-#paper-unfold-overlay.unfolding .paper-strip--right {
-  animation-name: paper-strip-unfold-right;
-  animation-duration: 700ms;
-  animation-timing-function: ease-out;
-  animation-fill-mode: forwards;
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
-/* Délais par bande, du centre (le plus court) vers les bords (le plus long) :
-   distance au centre = |index - 2.5| ; délai = distance * 150ms */
-#paper-unfold-overlay.unfolding .paper-strip:nth-child(1) { animation-delay: 375ms; }
-#paper-unfold-overlay.unfolding .paper-strip:nth-child(2) { animation-delay: 225ms; }
-#paper-unfold-overlay.unfolding .paper-strip:nth-child(3) { animation-delay: 75ms; }
-#paper-unfold-overlay.unfolding .paper-strip:nth-child(4) { animation-delay: 75ms; }
-#paper-unfold-overlay.unfolding .paper-strip:nth-child(5) { animation-delay: 225ms; }
-#paper-unfold-overlay.unfolding .paper-strip:nth-child(6) { animation-delay: 375ms; }
+.ar-incompatibility-ok-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: #55415d;
+  z-index: -1;
+  transition: left 0.4s ease;
+}
+
+.ar-incompatibility-ok-btn:hover {
+  color: #f4efe6;
+  box-shadow: 0 8px 30px rgba(85, 65, 93, 0.3);
+  transform: translateY(-2px);
+}
+
+.ar-incompatibility-ok-btn:hover::before {
+  left: 0;
+}
+
+.ar-incompatibility-ok-btn:active {
+  transform: translateY(0);
+}
+
+/* Responsive design pour mobile */
+@media (max-width: 768px) {
+  .dogo-logo {
+    width: 180px;
+    height: 180px;
+    margin-top: -20px;
+  }
+
+  .dogo-btn {
+    padding: 16px 40px;
+    font-size: 24px;
+    letter-spacing: 1px;
+  }
+
+  .return-btn {
+    padding: 12px 32px;
+    font-size: 16px;
+  }
+
+  .ar-incompatibility-logo {
+    width: 160px;
+    height: 160px;
+  }
+
+  .ar-incompatibility-message {
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+  }
+
+  .ar-incompatibility-ok-btn {
+    padding: 14px 40px;
+    font-size: 18px;
+    letter-spacing: 1px;
+  }
+}
+
+/* Barre de contrôle de vitesse du Plane */
