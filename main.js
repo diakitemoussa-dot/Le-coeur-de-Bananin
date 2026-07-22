@@ -340,12 +340,68 @@ arButton.addEventListener('click', () => {
     // canActivateAR (notamment la génération du USDZ pour Quick Look sur iOS)
     // n'est fiable qu'une fois le modèle chargé, donc on attend 'load' avant
     // de tenter l'activation la première fois.
-    arViewer.addEventListener('load', tryActivateAR, { once: true });
+    arViewer.addEventListener('load', () => {
+      // Une fois le modèle chargé, déclencher toutes les animations
+      playAllARAnimations();
+      tryActivateAR();
+    }, { once: true });
     arViewer.src = 'asset/model/scene-partie2.glb';
   } else {
     tryActivateAR();
   }
 });
+
+// Jouer toutes les animations du modèle en boucle continue en AR
+function playAllARAnimations() {
+  const animations = arViewer.availableAnimations;
+  if (!animations || animations.length === 0) {
+    console.log('Aucune animation trouvée dans le modèle AR');
+    return;
+  }
+
+  console.log(`✅ Animations trouvées: ${animations.join(', ')}`);
+
+  // Stratégie : jouer les animations séquentiellement en boucle infinie
+  // (model-viewer ne supporte que playback d'une animation à la fois)
+  let currentIndex = 0;
+  let animationTimeout = null;
+
+  function getAnimationDuration(animName) {
+    // Durée estimée en ms (model-viewer n'expose pas la vraie durée)
+    // À adapter selon tes animations réelles
+    return 3000; // 3 secondes par défaut
+  }
+
+  function playNext() {
+    if (currentIndex < animations.length) {
+      const animName = animations[currentIndex];
+      console.log(`▶️  Animation ${currentIndex + 1}/${animations.length}: ${animName}`);
+      arViewer.animationName = animName;
+      currentIndex++;
+
+      // Calculer la durée et passer à la suivante
+      const duration = getAnimationDuration(animName);
+      animationTimeout = setTimeout(() => {
+        playNext();
+      }, duration);
+    } else {
+      // Redémarrer la boucle depuis le début
+      console.log('🔄 Redémarrage des animations...');
+      currentIndex = 0;
+      playNext();
+    }
+  }
+
+  playNext();
+
+  // Nettoyer le timeout si on quitte l'AR
+  window.stopARAnimations = function stopARAnimations() {
+    if (animationTimeout) {
+      clearTimeout(animationTimeout);
+      console.log('Animations AR arrêtées');
+    }
+  };
+}
 
 // Bouton OK pour fermer l'écran d'incompatibilité AR
 arIncompatibilityBtn.addEventListener('click', () => {
