@@ -704,6 +704,7 @@ function init(gltf) {
 }
 
 let glbReadyCallback = null;
+let part1ModelLoadingStarted = false;
 
 // Même seuil que le choix d'image phone/pc du logo de chargement (style.css) : sous
 // 700px on charge un modèle dédié smartphone, au-dessus le modèle PC habituel. Le
@@ -718,18 +719,26 @@ dracoLoader.setDecoderPath('https://unpkg.com/three@0.164.0/examples/jsm/libs/dr
 
 const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
-loader.load(
-  MODEL_PATH,
-  (gltf) => {
-    loadedGltf = gltf;
-    if (glbReadyCallback) glbReadyCallback();
-  },
-  (event) => {
-    if (window.onScene3DProgress && event.total) {
-      window.onScene3DProgress(event.loaded / event.total);
-    }
-  },
-);
+
+// Lazy loading : ne charger le modèle de la Partie 1 que lorsque l'utilisateur
+// clique sur l'avion pour revenir à la Partie 1. Cela évite de charger deux gros
+// modèles 3D en parallèle au démarrage (qui bloquait l'écran de chargement).
+window.startLoadingPart1Model = function startLoadingPart1Model() {
+  if (part1ModelLoadingStarted) return;
+  part1ModelLoadingStarted = true;
+  loader.load(
+    MODEL_PATH,
+    (gltf) => {
+      loadedGltf = gltf;
+      if (glbReadyCallback) glbReadyCallback();
+    },
+    (event) => {
+      if (window.onScene3DProgress && event.total) {
+        window.onScene3DProgress(event.loaded / event.total);
+      }
+    },
+  );
+};
 
 window.onScene3DReady = function onScene3DReady(callback) {
   if (loadedGltf) callback();
@@ -751,5 +760,7 @@ function startWhenReady() {
 }
 
 window.startScene3D = function startScene3D() {
+  // Déclencher le chargement du modèle si ce n'est pas déjà fait
+  window.startLoadingPart1Model();
   startWhenReady();
 };

@@ -896,6 +896,13 @@ window.setScene3DPart2Visible = function setScene3DPart2Visible(visible) {
 const PART2_FADE_OUT_MS = 1200; // doit rester synchronisé avec la transition CSS de #scene3d-part2
 
 window.goToPart1 = function goToPart1() {
+  // Commencer le chargement du modèle Partie 1 IMMÉDIATEMENT au clic sur l'avion,
+  // en arrière-plan, sans bloquer la transition. Le modèle sera prêt quand
+  // l'animation du fondu croisé sera terminée.
+  if (typeof window.startLoadingPart1Model === 'function') {
+    window.startLoadingPart1Model();
+  }
+
   container.classList.remove('visible');
 
   const scene3dDiv = document.getElementById('scene3d');
